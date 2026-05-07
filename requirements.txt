@@ -1,4 +1,10 @@
 # Core deep learning
+# IMPORTANT: plain `pip install torch` installs the CPU-only build.
+# For GPU training on a GTX 1660 Super (CUDA 12.1):
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+# For CUDA 11.8:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu118
+# Run `nvidia-smi` in a terminal to find your CUDA version.
 torch>=2.1.0
 transformers>=4.40.0
 sentencepiece>=0.2.0
