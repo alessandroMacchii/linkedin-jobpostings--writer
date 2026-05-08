@@ -23,7 +23,8 @@ from transformers import AutoTokenizer, T5ForConditionalGeneration
 # -----------------------------------------------------------------------------
 # Config -- must match notebook Sections 4 and 7.
 # -----------------------------------------------------------------------------
-CHECKPOINT_DIR = Path("./checkpoint")  # the fine-tuned FLAN-T5-small
+CHECKPOINT_DIR   = Path("./checkpoint")     # the fine-tuned FLAN-T5-small
+BASE_MODEL_NAME  = "google/flan-t5-small"   # zero-shot baseline (Section 5)
 MAX_INPUT_LEN  = 256
 GEN_KWARGS = dict(
     max_length=384,
@@ -64,9 +65,11 @@ def build_prompt(row) -> str:
 # -----------------------------------------------------------------------------
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"[startup] Device: {DEVICE}")
-print(f"[startup] Loading tokenizer + model from {CHECKPOINT_DIR} ...")
+print(f"[startup] Loading fine-tuned model from {CHECKPOINT_DIR} ...")
 tokenizer = AutoTokenizer.from_pretrained(CHECKPOINT_DIR)
-model = T5ForConditionalGeneration.from_pretrained(CHECKPOINT_DIR).to(DEVICE).eval()
+model_tuned = T5ForConditionalGeneration.from_pretrained(CHECKPOINT_DIR).to(DEVICE).eval()
+print(f"[startup] Loading zero-shot baseline {BASE_MODEL_NAME} ...")
+model_base = T5ForConditionalGeneration.from_pretrained(BASE_MODEL_NAME).to(DEVICE).eval()
 print("[startup] Ready.")
 
 # -----------------------------------------------------------------------------
@@ -89,16 +92,23 @@ def _options(values, selected):
 HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Job Description Generator</title>
 <style>
-body{font-family:system-ui,sans-serif;max-width:820px;margin:2em auto;padding:0 1em;color:#222}
+body{font-family:system-ui,sans-serif;max-width:1200px;margin:2em auto;padding:0 1em;color:#222}
 h1{margin-bottom:.2em}
 label{display:block;margin-top:.7em;font-weight:600}
 input[type=text],input[type=number],select{width:100%;box-sizing:border-box;padding:.4em;font:inherit}
 button{margin-top:1em;padding:.6em 1.2em;font-size:1em;cursor:pointer}
 .output{white-space:pre-wrap;background:#f5f5f5;padding:1em;border:1px solid #ddd;margin-top:.5em;border-radius:4px}
 .row{display:flex;gap:.6em}.row>*{flex:1}
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:1em;margin-top:1em}
+.compare h3{margin:0 0 .3em 0}
+.compare .col{display:flex;flex-direction:column}
+.compare .col .output{flex:1}
+.tuned h3{color:#0a6}
+.base h3{color:#888}
+@media (max-width:760px){.compare{grid-template-columns:1fr}}
 </style></head><body>
 <h1>Job Description Generator</h1>
-<p>Fine-tuned FLAN-T5-small on LinkedIn postings. Fill in the form and click Generate.</p>
+<p>FLAN-T5-small on LinkedIn postings. Outputs from the fine-tuned model and the zero-shot baseline are shown side by side.</p>
 <form method="post">
   <label>Title <input type="text" name="title" value="__TITLE__" required></label>
   <div class="row">
@@ -122,7 +132,7 @@ __OUTPUT_BLOCK__
 # Inference.
 # -----------------------------------------------------------------------------
 @torch.no_grad()
-def run_model(prompt: str) -> str:
+def run_model(model, prompt: str) -> str:
     enc = tokenizer(prompt, max_length=MAX_INPUT_LEN, truncation=True, return_tensors="pt").to(DEVICE)
     out_ids = model.generate(**enc, **GEN_KWARGS)
     return tokenizer.decode(out_ids[0], skip_special_tokens=True)
@@ -175,15 +185,25 @@ def index():
         prompt = build_prompt(row)
         # Print to console so you can visually compare against training prompts.
         print("=" * 60)
-        print("PROMPT SENT TO MODEL:")
+        print("PROMPT SENT TO MODELS:")
         print(prompt)
         print("=" * 60)
 
-        generated = run_model(prompt)
+        gen_tuned = run_model(model_tuned, prompt)
+        gen_base  = run_model(model_base,  prompt)
         output_block = (
-            "<h2>Generated description</h2>"
-            f"<div class='output'>{_escape(generated)}</div>"
-            "<h3>Prompt sent to the model</h3>"
+            "<h2>Generated descriptions</h2>"
+            "<div class='compare'>"
+              "<div class='col tuned'>"
+                "<h3>Fine-tuned</h3>"
+                f"<div class='output'>{_escape(gen_tuned)}</div>"
+              "</div>"
+              "<div class='col base'>"
+                f"<h3>Zero-shot ({_escape(BASE_MODEL_NAME)})</h3>"
+                f"<div class='output'>{_escape(gen_base)}</div>"
+              "</div>"
+            "</div>"
+            "<h3>Prompt sent to both models</h3>"
             f"<div class='output'>{_escape(prompt)}</div>"
         )
 
