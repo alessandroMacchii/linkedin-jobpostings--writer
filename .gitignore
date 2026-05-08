@@ -1,2 +1,4 @@
-data/postings.csv
+data/
 .venv
+checkpoint/
+checkpoint_scratch/
