@@ -2,3 +2,5 @@ data/
 .venv
 checkpoint/
 checkpoint_scratch/
+.claude/settings.local.json
+.claude
