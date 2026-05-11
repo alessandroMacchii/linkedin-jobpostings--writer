@@ -33,7 +33,7 @@ CHECKPOINT_DIR         = Path("./checkpoint")
 CHECKPOINT_SCRATCH_DIR = Path("./checkpoint_scratch")
 BASE_MODEL_NAME        = "google/flan-t5-small"
 MAX_INPUT_LEN          = 256
-GEN_KWARGS = dict(max_length=384, num_beams=4, no_repeat_ngram_size=3, early_stopping=True)
+GEN_KWARGS = dict(max_length=500, num_beams=4, no_repeat_ngram_size=3, early_stopping=True)
 
 # ===========================================================================
 # build_prompt — COPY VERBATIM from notebook Section 3.
@@ -154,12 +154,13 @@ if TRANSFORMER_PATH.exists() and VOCAB_PATH.exists():
     def run_char_transformer(prompt: str, length: int = 400,
                              temperature: float = 1.0, p: float = 0.9) -> str:
         seed = [_stoi.get(c, 0) for c in prompt if c in _stoi]
-        while len(seed) < length:
+        n_prompt = len(seed)
+        while len(seed) < n_prompt + length:
             context = seed[-_CTX:]
             x = torch.tensor(context, dtype=torch.long, device=DEVICE).reshape(1, -1)
             logits = _transf(x)[0, -1, :].cpu()
             seed.append(_sample_top_p(logits, p=p, temperature=temperature).item())
-        return "".join(_itos.get(i, "") for i in seed)
+        return "".join(_itos.get(i, "") for i in seed[n_prompt:])
 
 print("[startup] Ready.")
 

@@ -23,6 +23,4 @@ tqdm>=4.66.0
 # Web app
 flask>=3.0.0
 
-# Section 7 only -- Keras .fit() from-scratch comparison.
-# CPU build is plenty for the small char-level models in that section.
-tensorflow>=2.16
+scikit-learn>=1.0.0
