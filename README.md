@@ -1,91 +1,103 @@
-# linkedin-jobpostings--writer
-**Goal.** Take structured job inputs (title, location, skills, experience level,
-industry) and produce a natural-language job description. We compare three
-approaches side by side:
+# LinkedIn Job Description Generator
 
-1. **Zero-shot FLAN-T5-small** — the pretrained model used without any task-specific training.
-2. **Fine-tuned FLAN-T5-small** — the same model fine-tuned on a cleaned subset of LinkedIn postings.
-3. **Character-level Transformer** — a small Transformer decoder built entirely from scratch,
-   using the same architecture as the Tiny Shakespeare exercise.
+Generation of job posting descriptions from structured attributes (title, location, skills, work type, experience level, industry), comparing three approaches with very different levels of "intelligence".
 
-**Why FLAN-T5-small?** It is a sequence-to-sequence (encoder-decoder) Transformer pretrained
-by Google on a large mixture of instruction-following tasks. "Small" means it fits in 6 GB
-of VRAM with mixed precision.
+## The three models compared
 
-**Sections:**
-1. Setup
-2. Load and clean data
-3. Build prompts and targets
-4. Tokenize and build a PyTorch Dataset
-5. Fine-tune FLAN-T5-small
-6. Character-level Transformer from scratch
-7. Compare all models
+1. **FLAN-T5-small zero-shot** — Google's pretrained model used as-is, with no training on LinkedIn data. Baseline that shows what pretraining alone provides.
+2. **FLAN-T5-small fine-tuned** — the same model, fine-tuned on the cleaned LinkedIn dataset. Shows how much domain fine-tuning adds.
+3. **Character Transformer from scratch** — a small character-level Transformer decoder trained from scratch. Control experiment showing what happens without pretraining, with the same architecture as the classic Tiny Shakespeare exercise.
 
-Libraries used in this notebook:
+**Why FLAN-T5-small?** It's an encoder-decoder Transformer pretrained by Google on a large mixture of instruction-following tasks. The "small" version (~77M parameters) fits in 6 GB of VRAM.
 
-- **`torch`** + **`torch.nn`** — PyTorch tensors, autograd, model definition, training loop.
-- **`transformers`** — HuggingFace library. Provides `T5ForConditionalGeneration` and
-  `AutoTokenizer`. Calling `from_pretrained("google/flan-t5-small")` downloads the weights
-  and builds the `nn.Module` automatically.
-- **`pandas`** / **`numpy`** — CSV loading and data manipulation.
-- **`langdetect`** — language identification used in Section 2 to filter non-English postings.
-- **`tqdm`** — progress bars.
+## Repository structure
 
-All dependencies are listed in `requirements.txt`. Install once with
-`pip install -r requirements.txt` before running the notebook.
+```
+.
+├── project.ipynb              # Main notebook with the full pipeline
+├── app.py                     # Flask web UI to compare the three models
+├── requirements.txt           # Python dependencies
+├── data/                      # Raw CSVs + cleaned cache (to download)
+├── checkpoint/                # Fine-tuned FLAN-T5 weights (to download)
+└── checkpoint_scratch/        # Char Transformer weights + vocabulary (to download)
+```
 
+> **Note:** the notebook `project.ipynb` was written by me as part of the project. The file `app.py`, on the other hand, was generated with AI assistance: it's just a small interactive demo to visually compare the outputs of the three models, not part of the original work.
 
-## Section 2 — Load and clean data
+## Data and pre-trained checkpoints
 
-Loads the raw CSVs and builds a clean DataFrame. Steps:
+The heavy files (raw Kaggle CSVs, the `df_cleaned.csv` cache, and the model weights) are not in the repo because they're too large. They're available at this Google Drive link:
 
-1. Load only the columns we need from `postings.csv`.
-2. Drop rows missing `title` or `description`.
-3. Keep only postings whose description is between **50 and 700 words**.
-4. Keep only **English** postings using `langdetect` on the first 500 characters
-   of each description. This step is slow (a few minutes) and runs only once —
-   the result is saved to `data/df_cleaned.csv`. On the next kernel restart the
-   first cell loads the cache and you can skip the rest of this section.
-5. Join human-readable **skill names** and **industry names** from the bridge
-   tables onto each posting.
+🔗 **[https://drive.google.com/file/d/1vQS7SPNK6qX2cJps26IQ8UsEe0a3sAmY/view?usp=sharing]**
 
-After this section `df` contains one row per posting with the original fields
-plus `skills_joined` and `industries_joined`.
+Once downloaded, place the folders at the root of the project so the structure matches the one described above.
 
-## Section 4 — Tokenize and build a PyTorch Dataset
+If you want to redo everything from scratch (regenerate cache + train models) just put the raw CSVs in `data/` and run the notebook — the `checkpoint/` and `checkpoint_scratch/` folders will be created automatically.
 
-The model works with integer token IDs, not raw strings. The tokenizer (SentencePiece
-for T5) splits text into subword pieces and maps each to an integer.
+## Setup
 
-This section has two cells:
+Install the requirements and execute the app.py file to see examples, to train or modify the project notebook you need to execute everything to tokenize and clean the examples (also setup the training method, like CUDA specifications)
 
-- **First cell** — loads the tokenizer and defines the `JobPostingDataset` class.
-  Run this every session — it takes about a second.
-- **Second cell** — pre-tokenizes all train/val/test examples. Only needed before
-  running Section 5 training. Skip it if you are going straight to Section 6 or 7.
+## Usage
 
-**The `-100` label trick.** `CrossEntropyLoss` ignores positions where the label
-is `-100`. We replace padding token IDs in the target with `-100` so the model is
-not rewarded for predicting padding.
+### Notebook
 
-**Lengths.** `max_input_length=256` covers the prompt. `max_target_length=384`
-covers most descriptions.
+Open `project.ipynb` and run the cells in order. The notebook is divided into 6 sections:
 
-## Section 5 — Fine-tune FLAN-T5-small
+1. **Setup** — imports, seeds, parameters.
+2. **Data cleaning** — starting from the raw CSVs, filters and cleans. Saves a cache in `data/df_cleaned.csv` to avoid re-running the (slow) pipeline every time.
+3. **Prompt and target construction** — structured template for input, cleaned description for output. 80/10/10 split into train/val/test.
+4. **Tokenization** — HuggingFace `AutoTokenizer`, padding to `max_length`, the `-100` trick on padding labels.
+5. **Fine-tuning FLAN-T5** — AdamW with warmup + linear decay, weight decay 0.01, gradient clipping. Saves the best checkpoint based on val loss. Time: ~6-10 hours on a GTX 1660 Super.
+6. **Char Transformer** — Transformer decoder trained from scratch on ~1M characters. Vocabulary of ~90 unique characters, context 256, 10 epochs.
+7. **Final comparison** — generates the same prompt with all three models and shows the outputs side by side.
 
-Starts from Google's pretrained FLAN-T5-small weights and continues training
-on our job-description data.
+If you've already downloaded the checkpoints from the Drive link, you can skip Sections 5 and 6 (training) and go straight to the comparison.
 
-**Training setup:**
-- AdamW optimizer, `lr=1e-4`, `weight_decay=0.01`
-- Linear warmup over the first 500 steps, then linear decay to 0
-- 3 epochs, gradient clipping at 1.0, gradient accumulation of 2
-  (effective batch size = 16)
+### Web interface
 
-**Loss.** Calling `model(input_ids=..., labels=...)` returns `outputs.loss`,
-the seq2seq cross-entropy over non-masked positions. We call `.backward()` on it directly.
+Once the checkpoints are in place:
 
-**Checkpoint.** The best-validation-loss model is saved to `./checkpoint/` at the
-end of each epoch. `app.py` loads from this directory at startup.
+```bash
+python app.py
+```
 
-**Time.** Roughly 6-10 hours on a GTX 1660 Super.
+Open `http://localhost:5000` in your browser. Fill in the form with title, location, skills, etc. and see the three outputs side by side.
+
+## Technical notes
+
+**Hardware tested:** GTX 1660 Super (6 GB VRAM), Windows + WSL2.
+
+**Train/serve parity:** the `build_prompt` function is duplicated identically in the notebook and in `app.py`. Same input template at training and inference time, otherwise quality degrades silently.
+
+**Generation parameters:**
+- `max_length=384` (FLAN-T5-small's pretraining limit)
+- `num_beams=4` (beam search instead of greedy)
+- `no_repeat_ngram_size=3` (T5 tends to repeat itself, this prevents it)
+- `early_stopping=True`
+
+**Metric:** cross-entropy loss on validation and test. Test loss is typically lower because dropout is disabled in evaluation. No generation-specific metrics like BLEU or ROUGE were implemented.
+
+## Expected results
+
+For the same prompt, qualitatively very different outputs:
+
+- **Zero-shot:** one or two generic sentences. Understands the prompt but doesn't know what a LinkedIn job description should look like.
+- **Fine-tuned:** complete and structured description, with recognizable sections like title/role/qualifications/responsibilities.
+- **Char Transformer:** gibberish that has the shape of English words but no real vocabulary or meaning.
+
+The comparison concretely shows the value of:
+1. Having a pretrained model (zero-shot is already decent vs. char Transformer being unusable).
+2. Adding domain fine-tuning (specialization to the "job posting" genre).
+
+## Main dependencies
+
+- **PyTorch** + **torch.nn** — tensors, autograd, training loop.
+- **transformers** (HuggingFace) — `T5ForConditionalGeneration`, `AutoTokenizer`, scheduler with warmup.
+- **pandas / numpy** — CSV loading and data manipulation.
+- **scikit-learn** — train/val/test split.
+- **langdetect** — English-only filter on descriptions.
+- **flask** — web interface for the interactive comparison.
+- **tqdm** — progress bars.
+
+Full list in `requirements.txt`.
